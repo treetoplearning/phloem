@@ -1,0 +1,22 @@
+{
+  "name": "phloem",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Treetop-Learning/phloem.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Treetop-Learning/phloem/issues"
+  },
+  "homepage": "https://github.com/Treetop-Learning/phloem#readme",
+  "dependencies": {
+    "ws": "^7.2.3"
+  }
+}
