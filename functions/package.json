@@ -17,11 +17,13 @@
   },
   "homepage": "https://github.com/Treetop-Learning/phloem#readme",
   "dependencies": {
+    "@sendgrid/mail": "^7.2.0",
     "body-parser": "^1.19.0",
     "cors": "^2.8.5",
     "dotenv": "^8.2.0",
     "express": "^4.17.1",
     "firebase-admin": "^8.12.1",
+    "firebase-functions": "^3.7.0",
     "path": "^0.12.7",
     "twilio": "^3.42.2",
     "ws": "^7.2.3"
