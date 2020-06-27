@@ -23,8 +23,6 @@ app.use("*", cors);
 app.use(bodyParser.json());
 
 app.post("/sendemail", (req, res) => {
-
-
   const msg = {
     to: req.body.email.recipient,
     from: functions.config().sendgrid.sender,
@@ -39,10 +37,18 @@ app.post("/sendemail", (req, res) => {
 
 });
 
+// send back the secrets needed to initialize the calendar
+app.get("/schedulesetup", (req, res) => {
+  console.log(functions.config().fullcalendar.api_key)
+  res.send({api_key: functions.config().fullcalendar.api_key, calendar_id: functions.config().fullcalendar.calendar_id})
+});
+
 // Twilio Video
 app.post("/token", (req, res) => {
-  const identity = String(Math.random());
-  const roomName = "Treetop-Testing"; //req.query;
+
+  const identity = req.body.identity
+  const roomName = req.body.room
+
   const token = new AccessToken(
     functions.config().twilio.account_sid,
     functions.config().twilio.api_key_sid,
@@ -51,6 +57,7 @@ app.post("/token", (req, res) => {
       ttl: 14400,
     }
   );
+
   token.identity = identity;
 
   const videoGrant = new VideoGrant({ room: roomName });
