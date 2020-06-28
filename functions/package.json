@@ -24,6 +24,7 @@
     "express": "^4.17.1",
     "firebase-admin": "^8.12.1",
     "firebase-functions": "^3.7.0",
+    "googleapis": "^52.1.0",
     "path": "^0.12.7",
     "twilio": "^3.42.2",
     "ws": "^7.2.3"
