@@ -11,23 +11,36 @@ const VideoGrant = AccessToken.VideoGrant;
 
 require("dotenv").config();
 
+// initialize the Firebase admin ccount
+let admin = require("firebase-admin");
+
 // Google Calendar configurations
+const googleCredentials = require("./calendar-credentials.json");
+
 const OAuth2 = google.auth.OAuth2;
 const calendar = google.calendar("v3");
 
-const googleCredentials = require("./calendar-credentials.json");
+// create OAuth2Client object with fresh token to be able to write to calendar
+const OAuth2Client = new OAuth2(
+  googleCredentials.web.client_id,
+  googleCredentials.web.client_secret,
+  googleCredentials.web.redirect_uris[0]
+);
+
+// set the refresh token in the OAuth to avoid constantly generating new access tokens
+OAuth2Client.setCredentials({
+  refresh_token: googleCredentials.refresh_token,
+});
 
 const ERROR_RESPONSE = {
   status: "500",
   message: "There was an error adding an event to your Google calendar",
 };
-const TIME_ZONE = "EST";
+
+const TIME_ZONE = "America/Los_Angeles";
 
 // SendGrid configurations
 sgMail.setApiKey(functions.config().sendgrid.api_key);
-
-// initialize the Firebase admin ccount
-let admin = require("firebase-admin");
 
 admin.initializeApp();
 
@@ -50,88 +63,121 @@ app.post("/sendemail", (req, res) => {
     .catch((error) => console.log("Error!", error));
 });
 
-// send back the secrets needed to initialize the calendar
-app.get("/schedulesetup", (req, res) => {
-  console.log(functions.config().fullcalendar.api_key);
-  res.send({
-    api_key: functions.config().fullcalendar.api_key,
-    calendar_id: functions.config().fullcalendar.calendar_id,
-  });
-});
+// book the input lesson for the user and send back
+app.post("/bookLesson", async (req, res) => {
 
-app.post("/schedulemeeting", (req, res) => {
-
-  // extract all info from request
-  const email = req.body.email;
-  const date = req.body.date;
-  const time = req.body.time;
+  const fullName = req.body.firstName + " " + req.body.lastName
+  const email = req.body.email
+  const targetLessonId = req.body.lessonId;
   const uid = req.body.uid;
-  const firstName = req.body.firstName;
-  const lastName = req.body.lastName;
 
-  // build times from req information in correct format
-  const startTime = date + "T" + time + ":00"
-  const endTime = date + "T" + "14:30" + ":00"
+   // array to hold all events to be sent back (after events have been edited )
+   let finalEvents = [];
 
-  const eventData = {
-    eventName: "Treetop Learning Lesson",
-    description: "Weekly lesson with instructor.",
-    startTime: startTime,
-    endTime: endTime,
-  };
-
-  // create OAuth2Client object with fresh token to be able to write to calendar
-  const oAuth2Client = new OAuth2(
-    googleCredentials.web.client_id,
-    googleCredentials.web.client_secret,
-    googleCredentials.web.redirect_uris[0]
-  );
-
-  oAuth2Client.setCredentials({
-    refresh_token: googleCredentials.refresh_token,
-  });
-
-  // add the constructed event to the inputted user
-  addEvent(eventData, oAuth2Client)
-    .then((data) => {
-      res.status(200).send(data);
-      return;
+  // get all the events in the calendar
+  const events = await calendar.events
+    .list({
+      auth: OAuth2Client,
+      calendarId: "primary",
+      maxResults: 100000,
+      singleEvents: true,
+      orderBy: "startTime",
     })
-    .catch((err) => {
-      console.error("Error adding event: " + err.message);
-      res.status(500).send(ERROR_RESPONSE);
-      return;
+    .then((res) => {
+      return res.data.items;
     });
+
+  // loop through the events and search for the event to be booked
+  for (let x = 0; x < events.length; x++) {
+
+    if (events[x].id === targetLessonId) {
+
+      // extract that event so edits can be made to it
+      let targetLesson = events[x];
+
+      targetLesson.attendees.push({
+        email: email,
+        displayname: fullName,
+        responseStatus: "needsAction",
+      });
+
+      // update description to reflect booking
+      targetLesson.description = uid
+ 
+      // save updates to the calendar
+      calendar.events
+        .patch({
+          auth: OAuth2Client,
+          calendarId: "primary",
+          eventId: targetLessonId,
+          resource: targetLesson,
+        })
+        .then((res) => console.log("success in patching event", res ))
+        .catch((err) =>
+          console.log("there was an error in patching the event", err)
+        );
+    }
+  }
+
+  res.send({ res: "successfull" });
 });
 
-// add event to calendar
-const addEvent = (event, auth) => {
-  return new Promise(function(resolve, reject) {
-      calendar.events.insert({
-          auth: auth,
-          calendarId: 'primary',
-          resource: {
-              'summary': event.eventName,
-              'description': event.description,
-              'start': {
-                  'dateTime': event.startTime,
-                  'timeZone': TIME_ZONE,
-              },
-              'end': {
-                  'dateTime': event.endTime,
-                  'timeZone': TIME_ZONE,
-              },
-          },
-      }, (err, res) => {
-          if (err) {
-              console.log('Rejecting because of error');
-              reject(err);
-          }
-          console.log('Request successful');
-          resolve(res.data);
+// send back all events and mark events that have been booked by other students
+app.post("/getUserEvents", async (req, res) => {
+
+  
+  // uid to check against all events in calendar
+  const targetUid = req.body.uid;
+
+  // array to hold all events to be sent back (after events have been edited )
+  let finalEvents = [];
+
+  // get all the events in the calendar
+  const events = await calendar.events
+    .list({
+      auth: OAuth2Client,
+      calendarId: "primary",
+      maxResults: 100000,
+      singleEvents: true,
+      orderBy: "startTime",
+    })
+    .then((res) => {
+      return res.data.items;
+    });
+    
+
+  // loop through all the events and create FullCalendar events to be sent back
+  for (let x = 0; x < events.length; x++) {
+
+    // check if the event belongs to the user
+    if (events[x].description === targetUid) {
+
+      // if so create a FullCalender event with booked coloring
+      finalEvents.push({
+        id: events[x].id,
+        title: events[x].summary,
+        start: events[x].start.dateTime,
+        end: events[x].end.dateTime,
+        backgroundColor: "red",
+        extendedProps: { booked: true },
       });
-  })
-}
+    } else {
+      // if not create a FullCalendar event with unbooked coloring
+      finalEvents.push({
+        id: events[x].id,
+        title: events[x].summary,
+        start: events[x].start.dateTime,
+        end: events[x].end.dateTime,
+        backgroundColor: "green",
+        extendedProps: { booked: false },
+      });
+    }
+  }
+
+  // console.log("target_event is are", target_event);
+
+  res.send({ events: finalEvents });
+});
 
 // Twilio Video
 app.post("/token", (req, res) => {
@@ -161,16 +207,11 @@ app.post("/verify", (req, res) => {
     .verifyIdToken(req.body.idt)
     .then((decodedToken) => {
       let uid = decodedToken.uid;
-      console.log(uid);
       res.send(JSON.stringify({ uid: uid }));
     })
     .catch((error) => {
       console.log("there was an error in verify", error);
     });
-});
-
-app.get("/testing", (request, response) => {
-  response.send("Congrats.");
 });
 
 app.use(cors);
