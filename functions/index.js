@@ -65,14 +65,13 @@ app.post("/sendemail", (req, res) => {
 
 // book the input lesson for the user and send back
 app.post("/bookLesson", async (req, res) => {
-
-  const fullName = req.body.firstName + " " + req.body.lastName
-  const email = req.body.email
+  const fullName = req.body.firstName + " " + req.body.lastName;
+  const email = req.body.email;
   const targetLessonId = req.body.lessonId;
   const uid = req.body.uid;
 
-   // array to hold all events to be sent back (after events have been edited )
-   let finalEvents = [];
+  // array to hold all events to be sent back (after events have been edited )
+  let finalEvents = [];
 
   // get all the events in the calendar
   const events = await calendar.events
@@ -89,11 +88,13 @@ app.post("/bookLesson", async (req, res) => {
 
   // loop through the events and search for the event to be booked
   for (let x = 0; x < events.length; x++) {
-
-    if (events[x].id === targetLessonId) {
-
+    if (events[x].id === targetLessonId && events[x].description == null) {
       // extract that event so edits can be made to it
       let targetLesson = events[x];
+
+      if (typeof targetLesson.attendees === "undefined") {
+        targetLesson.attendees = [];
+      }
 
       targetLesson.attendees.push({
         email: email,
@@ -102,8 +103,8 @@ app.post("/bookLesson", async (req, res) => {
       });
 
       // update description to reflect booking
-      targetLesson.description = uid
- 
+      targetLesson.description = uid;
+
       // save updates to the calendar
       calendar.events
         .patch({
@@ -112,7 +113,7 @@ app.post("/bookLesson", async (req, res) => {
           eventId: targetLessonId,
           resource: targetLesson,
         })
-        .then((res) => console.log("success in patching event", res ))
+        .then((res) => console.log("success in patching event", res))
         .catch((err) =>
           console.log("there was an error in patching the event", err)
         );
@@ -124,8 +125,6 @@ app.post("/bookLesson", async (req, res) => {
 
 // send back all events and mark events that have been booked by other students
 app.post("/getUserEvents", async (req, res) => {
-
-  
   // uid to check against all events in calendar
   const targetUid = req.body.uid;
 
@@ -144,37 +143,48 @@ app.post("/getUserEvents", async (req, res) => {
     .then((res) => {
       return res.data.items;
     });
-    
+
+  console.log(events);
 
   // loop through all the events and create FullCalendar events to be sent back
   for (let x = 0; x < events.length; x++) {
-
-    // check if the event belongs to the user
     if (events[x].description === targetUid) {
-
-      // if so create a FullCalender event with booked coloring
+      // case 1 - the event belongs to the user and unbooked
       finalEvents.push({
         id: events[x].id,
         title: events[x].summary,
         start: events[x].start.dateTime,
         end: events[x].end.dateTime,
-        backgroundColor: "red",
+        className: ["bg-red-600 text-white"],
+        backgroundColor: "white",
+        extendedProps: { booked: true },
+      });
+    } else if (typeof events[x].description !== "undefined") {
+      // case 2 - the event belongs to the user and is booked
+
+      finalEvents.push({
+        id: events[x].id,
+        title: events[x].summary,
+        start: events[x].start.dateTime,
+        end: events[x].end.dateTime,
+        className: ["bg-blue-600 text-white"],
+        backgroundColor: "white",
         extendedProps: { booked: true },
       });
     } else {
-      // if not create a FullCalendar event with unbooked coloring
+      // case 3 - the event does not belong to the user
+
       finalEvents.push({
         id: events[x].id,
         title: events[x].summary,
         start: events[x].start.dateTime,
         end: events[x].end.dateTime,
-        backgroundColor: "green",
+        className: ["bg-base text-white"],
+        backgroundColor: "white",
         extendedProps: { booked: false },
       });
     }
   }
-
-  // console.log("target_event is are", target_event);
 
   res.send({ events: finalEvents });
 });
