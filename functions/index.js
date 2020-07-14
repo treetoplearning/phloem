@@ -2,13 +2,13 @@ const functions = require("firebase-functions");
 const express = require("express");
 const app = express();
 const bodyParser = require("body-parser");
-const sgMail = require("@sendgrid/mail");
 const cors = require("cors")({ origin: "*" });
 const { google } = require("googleapis");
 const path = require("path");
+const md5 = require("md5");
+const isToday = require("date-fns/isToday");
 const AccessToken = require("twilio").jwt.AccessToken;
 const VideoGrant = AccessToken.VideoGrant;
-
 require("dotenv").config();
 
 // initialize the Firebase admin ccount
@@ -16,6 +16,7 @@ let admin = require("firebase-admin");
 
 // Google Calendar configurations
 const googleCredentials = require("./calendar-credentials.json");
+const { constants } = require("os");
 
 const OAuth2 = google.auth.OAuth2;
 const calendar = google.calendar("v3");
@@ -39,39 +40,18 @@ const ERROR_RESPONSE = {
 
 const TIME_ZONE = "America/Los_Angeles";
 
-// SendGrid configurations
-sgMail.setApiKey(functions.config().sendgrid.api_key);
-
 admin.initializeApp();
 
 app.use(express.static(path.join(__dirname, "build")));
 app.use("*", cors);
 app.use(bodyParser.json());
 
-app.post("/sendemail", (req, res) => {
-  const msg = {
-    to: req.body.email.recipient,
-    from: functions.config().sendgrid.sender,
-    subject: "Treetop Newsletter - Email Address Verification",
-    html:
-      "<div>  Welcome to Treetop Learning, <br> <br> To confirm your account for our weekly newsletter please follow this link: <a href='https://cdn.forms-content.sg-form.com/f99cddf4-b193-11ea-a875-5aa83703c24e'> verify email </a>.<br><br> All the best, <br> <br> The Treetop Learning Team </div>",
-  };
-
-  sgMail
-    .send(msg)
-    .then((message) => console.log("Success!"))
-    .catch((error) => console.log("Error!", error));
-});
-
 // book the input lesson for the user and send back
 app.post("/bookLesson", async (req, res) => {
   const fullName = req.body.firstName + " " + req.body.lastName;
   const email = req.body.email;
   const targetLessonId = req.body.lessonId;
-  const uid = req.body.uid;
-
-  // array to hold all events to be sent back (after events have been edited )
-  let finalEvents = [];
+  const maskedUID = md5(req.body.uid);
 
   // get all the events in the calendar
   const events = await calendar.events
@@ -85,6 +65,14 @@ app.post("/bookLesson", async (req, res) => {
     .then((res) => {
       return res.data.items;
     });
+
+  // ensure that the user only has one event booked max
+  for (let x = 0; x < events.length; x++) {
+    if (events[x].description === maskedUID) {
+      res.send({ message: "maxBooked" });
+      return;
+    }
+  }
 
   // loop through the events and search for the event to be booked
   for (let x = 0; x < events.length; x++) {
@@ -103,7 +91,7 @@ app.post("/bookLesson", async (req, res) => {
       });
 
       // update description to reflect booking
-      targetLesson.description = uid;
+      targetLesson.description = maskedUID;
 
       // save updates to the calendar
       calendar.events
@@ -120,13 +108,62 @@ app.post("/bookLesson", async (req, res) => {
     }
   }
 
-  res.send({ res: "successfull" });
+  res.send({ message: "successfull" });
+});
+
+// return the next meeting
+app.post("/getNextMeeting", async (req, res) => {
+  let maskedUID = md5(req.body.uid);
+
+  // variable for when to start looking for events
+  let currentTime = new Date().toISOString();
+
+  const nextEvents = await calendar.events
+    .list({
+      auth: OAuth2Client,
+      calendarId: "primary",
+      maxResults: 1000,
+      singleEvents: true,
+      orderBy: "startTime",
+      timeMin: currentTime,
+    })
+    .then((res) => {
+      return res.data.items;
+    });
+
+    // check if the admin is requesting the next lesson
+    if (maskedUID === functions.config().admin.id) {
+      if (nextEvents.length !== 0) {
+        res.send({startTime: nextEvents[0].start, stopTime: nextEvents[0].end})
+      } else {
+        res.send({startTime: -1, stopTime: -1})
+      }
+      
+      return;
+    }
+
+  // iterate through all ongoing or future events and return first date that matches user UID
+  for (let x = 0; x < nextEvents.length; x++) {
+    if (nextEvents[x].description === maskedUID) {
+      
+      res.send({ startTime: nextEvents[x].start, stopTime: nextEvents[x].end });
+      return;
+    }
+  }
+
+  // if there is no future event that matches the input uid
+  res.send({ startTime: -1, stopTime: -1 });
 });
 
 // send back all events and mark events that have been booked by other students
 app.post("/getUserEvents", async (req, res) => {
   // uid to check against all events in calendar
-  const targetUid = req.body.uid;
+
+  const maskedUID = md5(req.body.uid);
+
+  const firstName = req.body.firstName;
+  const lastName = req.body.lastName;
+  const fullName = firstName + " " + lastName;
 
   // array to hold all events to be sent back (after events have been edited )
   let finalEvents = [];
@@ -144,18 +181,18 @@ app.post("/getUserEvents", async (req, res) => {
       return res.data.items;
     });
 
-  console.log(events);
-
   // loop through all the events and create FullCalendar events to be sent back
   for (let x = 0; x < events.length; x++) {
-    if (events[x].description === targetUid) {
+
+    // make an array to check all id's in the description
+    if (events[x].description === maskedUID) {
       // case 1 - the event belongs to the user and unbooked
       finalEvents.push({
         id: events[x].id,
-        title: events[x].summary,
+        title: fullName,
         start: events[x].start.dateTime,
         end: events[x].end.dateTime,
-        className: ["bg-red-600 text-white"],
+        className: ["bg-blue-600 text-white hover:opacity-75"],
         backgroundColor: "white",
         extendedProps: { booked: true },
       });
@@ -164,10 +201,10 @@ app.post("/getUserEvents", async (req, res) => {
 
       finalEvents.push({
         id: events[x].id,
-        title: events[x].summary,
+        title: "Busy",
         start: events[x].start.dateTime,
         end: events[x].end.dateTime,
-        className: ["bg-blue-600 text-white"],
+        className: ["bg-red-500 text-white hover:opacity-75"],
         backgroundColor: "white",
         extendedProps: { booked: true },
       });
@@ -176,10 +213,10 @@ app.post("/getUserEvents", async (req, res) => {
 
       finalEvents.push({
         id: events[x].id,
-        title: events[x].summary,
+        title: "Free",
         start: events[x].start.dateTime,
         end: events[x].end.dateTime,
-        className: ["bg-base text-white"],
+        className: ["bg-base text-white hover:opacity-75"],
         backgroundColor: "white",
         extendedProps: { booked: false },
       });
@@ -190,9 +227,10 @@ app.post("/getUserEvents", async (req, res) => {
 });
 
 // Twilio Video
-app.post("/token", (req, res) => {
-  const identity = req.body.identity;
-  const roomName = req.body.room;
+app.post("/token", async (req, res) => {
+
+  const uid = req.body.identity;
+  const maskedUID = md5(uid);
 
   const token = new AccessToken(
     functions.config().twilio.account_sid,
@@ -203,11 +241,60 @@ app.post("/token", (req, res) => {
     }
   );
 
-  token.identity = identity;
+  // variable for when to start looking for events
+  let currentTime = new Date().toISOString();
 
-  const videoGrant = new VideoGrant({ room: roomName });
+  const nextEvents = await calendar.events
+    .list({
+      auth: OAuth2Client,
+      calendarId: "primary",
+      maxResults: 1000,
+      singleEvents: true,
+      orderBy: "startTime",
+      timeMin: currentTime,
+    })
+    .then((res) => {
+      return res.data.items;
+    })
+    .catch((err) => {
+      console.log("There was an error in retrieving the next events")
+    })
+
+  // get access to the current lesson if req comes from an admin
+  if (functions.config().admin.id === maskedUID) {
+  
+    token.identity = md5(uid);
+
+    const currentRoomName = nextEvents[0].description
+    console.log(currentRoomName)
+  
+    const videoGrant = new VideoGrant({ room: currentRoomName });
+    token.addGrant(videoGrant);
+    res.send({accessToken: token.toJwt(), roomName: currentRoomName})
+    return
+  }
+
+  // iterate through all ongoing or future events and return first date that matches user UID and is today
+  for (let x = 0; x < nextEvents.length; x++) {
+    if (nextEvents[x].description === maskedUID) {
+      const nextEvent = new Date(nextEvents[x].start.dateTime);
+
+      // send an error back if the user's earliest event is not today
+      if (!isToday(nextEvent)) {
+        return res.status(400).send({
+          message: 'error'
+       });
+      
+      } 
+    }
+  }
+
+  token.identity = uid;
+
+  const videoGrant = new VideoGrant({ room: maskedUID });
   token.addGrant(videoGrant);
-  res.send(token.toJwt());
+  res.send({accessToken: token.toJwt(), roomName: maskedUID})
+
 });
 
 // firebase verification
@@ -224,6 +311,11 @@ app.post("/verify", (req, res) => {
     });
 });
 
-app.use(cors);
+// firebase verification
+app.get("/testing", (req, res) => {
+  res.send("successful call to /testing")
+});
+
+// app.use(cors);
 
 exports.app = functions.https.onRequest(app);
