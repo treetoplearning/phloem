@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "treetop-learning-1589657684780"
+    "production": "treetop-learning",
+    "develop": "treetop-learning-develop"
   }
 }

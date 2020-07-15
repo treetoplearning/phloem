@@ -15,3 +15,5 @@ functions/.gitignore
 functions/treetop-learning-1589657684780-a3a8abfe99e9.json
 
 functions/.runtimeconfig.json
+
+functions/calendar-credentials.json
