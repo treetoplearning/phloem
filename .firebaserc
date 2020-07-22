@@ -1,6 +1,5 @@
 {
   "projects": {
-    "production": "treetop-learning",
-    "develop": "treetop-learning-develop"
+    "production": "treetop-learning"
   }
 }
