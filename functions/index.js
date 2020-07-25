@@ -102,14 +102,17 @@ app.post("/bookLesson", async (req, res) => {
           resource: targetLesson,
         })
         .then((res) => console.log("success in patching event", res))
-        .catch((err) =>
-          console.log("there was an error in patching the event", err)
-        );
+       
     }
   }
 
-  res.send({ message: "successfull" });
+  res.send({ message: "successful" });
 });
+
+app.post("/getIDEToken", (req, res) => {
+  let maskedIDEToken = md5(md5(req.body.uid))
+  res.send({IDEToken: maskedIDEToken})
+})
 
 // return the next meeting
 app.post("/getNextMeeting", async (req, res) => {
@@ -132,8 +135,9 @@ app.post("/getNextMeeting", async (req, res) => {
     });
 
     // check if the admin is requesting the next lesson
-    if (maskedUID === functions.config().admin.id) {
+    if (maskedUID === functions.config().admin_user.id) {
       if (nextEvents.length !== 0) {
+        // if next meeting exists also send the IDE hash so both users can share code
         res.send({startTime: nextEvents[0].start, stopTime: nextEvents[0].end})
       } else {
         res.send({startTime: -1, stopTime: -1})
@@ -260,8 +264,8 @@ app.post("/token", async (req, res) => {
       console.log("There was an error in retrieving the next events")
     })
 
-  // get access to the current lesson if req comes from an admin
-  if (functions.config().admin.id === maskedUID) {
+  // get access to the current lesson if req comes from an 
+  if (functions.config().admin_user.id === maskedUID) {
   
     token.identity = md5(uid);
 
